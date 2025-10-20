@@ -3,7 +3,7 @@
 // =======================================================
 
 // Локальный адрес для тестирования!
-const API_BASE_URL = "http://127.0.0.1:8000/api";
+const API_BASE_URL = "http://37.220.81.157:8088/api";
 let currentPage = 1;
 let currentQuery = "";
 let totalPages = 1;
