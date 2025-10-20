@@ -1,0 +1,16 @@
+# Environment
+venv/
+__pycache__/
+*.pyc
+*.egg-info/
+
+# Секреты (КРАЙНЕ ВАЖНО)
+.env
+
+# Docker
+docker-compose.yml
+!docker-compose.test.yml # Если будем использовать тестовый
+
+# Игнорировать локальные файлы IDE
+.idea/
+.vscode/

@@ -1,0 +1,5 @@
+fastapi
+uvicorn
+paramiko
+Pillow
+python-dotenv
