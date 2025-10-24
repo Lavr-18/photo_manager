@@ -5,7 +5,7 @@ from paramiko import SSHClient, AutoAddPolicy
 from io import BytesIO
 from PIL import Image
 import mimetypes
-from urllib.parse import unquote, quote  # <--- ДОБАВЛЕН ИМПОРТ в начало файла
+from urllib.parse import unquote, quote  # Импорт для корректной работы с кириллицей в URL
 
 # --- КОНФИГУРАЦИЯ СЕРВЕРА ---
 # Директория с фотографиями на удаленном сервере
@@ -38,6 +38,7 @@ app = FastAPI(
 def get_sftp_client():
     """Подключается к удаленному серверу по SFTP."""
     if not all([SSH_HOST, SSH_USER, SSH_PASSWORD]):
+        # Ошибка, если учетные данные SSH не установлены
         raise Exception("SSH credentials are not set in environment variables.")
 
     client = SSHClient()
@@ -78,7 +79,7 @@ async def list_files(page: int = Query(1, ge=1), query: str = Query("")):
 
         files_data = []
         for filename in paged_list:
-            # Используем quote для URL-кодирования
+            # Используем quote для URL-кодирования имени файла, чтобы избежать ошибок
             encoded_name = quote(filename, safe='')
 
             files_data.append({
@@ -109,7 +110,7 @@ async def get_photo_preview(filename: str, download: bool = Query(False)):
     client, sftp = None, None
     try:
         # 1. Корректное декодирование имени файла
-        # Используем unquote для обратного URL-декодирования
+        # Используем unquote для обратного URL-декодирования.
         decoded_filename = unquote(filename)
 
         # 2. Подключение и чтение
@@ -131,6 +132,7 @@ async def get_photo_preview(filename: str, download: bool = Query(False)):
                 img.thumbnail(PREVIEW_SIZE)
 
                 output = BytesIO()
+                # Сохраняем в том же формате, что и исходный файл (если возможно)
                 img.save(output, format=img.format if img.format else 'PNG')
                 content = output.getvalue()
             except Exception as thumbnail_error:
@@ -142,19 +144,27 @@ async def get_photo_preview(filename: str, download: bool = Query(False)):
         # 4. Установка заголовков
         headers = None
         if download:
-            # Устанавливаем заголовок Content-Disposition для принудительного скачивания
+            # ИСПРАВЛЕНИЕ 'latin-1' ОШИБКИ:
+            # Используем RFC 5987 (filename*) для правильного кодирования кириллицы в заголовке Content-Disposition.
+            # quote(decoded_filename, safe='') гарантирует, что имя файла будет корректно URL-закодировано для заголовка.
+            encoded_header_filename = quote(decoded_filename, safe='')
+
             headers = {
-                "Content-Disposition": f"attachment; filename=\"{decoded_filename}\""
+                "Content-Disposition": f"attachment; filename=\"{decoded_filename}\"; filename*=utf-8''{encoded_header_filename}"
             }
+
+        # Если тип MIME не определен, используем 'application/octet-stream' для бинарных данных
+        if not media_type:
+            media_type = 'application/octet-stream'
 
         return Response(content=content, media_type=media_type, headers=headers)
 
     except FileNotFoundError:
-        # Возвращаем JSONResponse со строкой
+        # Возвращаем 404
         return Response(status_code=404, content='{"detail": "File not found"}', media_type="application/json")
     except Exception as e:
         print(f"Error retrieving file: {e}")
-        # Возвращаем JSONResponse со строкой
+        # Возвращаем 500
         return Response(status_code=500, content='{"detail": "Internal Server Error"}', media_type="application/json")
     finally:
         if sftp:
