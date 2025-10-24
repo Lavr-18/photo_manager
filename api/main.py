@@ -5,6 +5,7 @@ from paramiko import SSHClient, AutoAddPolicy
 from io import BytesIO
 from PIL import Image
 import mimetypes
+from urllib.parse import unquote  # <--- ДОБАВЛЕН ИМПОРТ
 
 # --- КОНФИГУРАЦИЯ СЕРВЕРА ---
 # Директория с фотографиями на удаленном сервере
@@ -77,8 +78,13 @@ async def list_files(page: int = Query(1, ge=1), query: str = Query("")):
 
         files_data = []
         for filename in paged_list:
-            # URL-кодирование для корректной передачи кириллицы в ссылках
-            encoded_name = filename.encode('utf-8').decode('latin-1').replace(' ', '%20')
+            # URL-кодирование для корректной передачи кириллицы в ссылках (для extension/popup.js)
+            # Мы используем кодирование UTF-8, чтобы избежать проблем с Latin-1
+            encoded_name = filename.encode('utf-8').hex().upper()
+
+            # Более простой способ кодирования (просто URL-кодирование)
+            from urllib.parse import quote
+            encoded_name = quote(filename, safe='')
 
             files_data.append({
                 "name": filename,
@@ -108,11 +114,8 @@ async def get_photo_preview(filename: str, download: bool = Query(False)):
     client, sftp = None, None
     try:
         # 1. Корректное декодирование имени файла
-        # Обратное декодирование URL-encoded строки для получения имени файла
-        # ИСПРАВЛЕНО: Правильное декодирование для Paramiko.
-        # Paramiko не может обработать кириллицу в пути без правильного декодирования.
-        # Мы используем latin-1, потому что ранее закодировали в latin-1.
-        decoded_filename = filename.encode('latin-1').decode('utf-8').replace('%20', ' ')
+        # ИСПРАВЛЕНО: Используем unquote для обратного URL-декодирования.
+        decoded_filename = unquote(filename)
 
         # 2. Подключение и чтение
         client, sftp = get_sftp_client()
@@ -152,11 +155,11 @@ async def get_photo_preview(filename: str, download: bool = Query(False)):
         return Response(content=content, media_type=media_type, headers=headers)
 
     except FileNotFoundError:
-        # ИСПРАВЛЕНО: Возвращаем JSONResponse или Response со строкой, а не словарь
+        # ИСПРАВЛЕНО: Возвращаем JSONResponse со строкой
         return Response(status_code=404, content='{"detail": "File not found"}', media_type="application/json")
     except Exception as e:
         print(f"Error retrieving file: {e}")
-        # ИСПРАВЛЕНО: Возвращаем JSONResponse или Response со строкой, а не словарь
+        # ИСПРАВЛЕНО: Возвращаем JSONResponse со строкой
         return Response(status_code=500, content='{"detail": "Internal Server Error"}', media_type="application/json")
     finally:
         if sftp:
