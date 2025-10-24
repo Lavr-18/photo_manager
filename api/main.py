@@ -1,147 +1,161 @@
-from dotenv import load_dotenv
 import os
-from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import JSONResponse, StreamingResponse
-import paramiko
+from fastapi import FastAPI, Query
+from fastapi.responses import Response
+from paramiko import SSHClient, AutoAddPolicy
 from io import BytesIO
 from PIL import Image
-from urllib.parse import quote, unquote
-import urllib.parse
+import mimetypes
 
-# Загружаем переменные окружения из файла .env (ТОЛЬКО ЛОКАЛЬНО!)
-# В продакшене Docker передаст SSH_PASSWORD напрямую.
-load_dotenv()
-
-# --- Конфигурация SSH и API ---
-# Сервер, к которому подключаемся по SSH (хранит фото)
-SSH_HOST = os.getenv("SSH_HOST")
-SSH_USER = os.getenv("SSH_USER")
-# Пароль будет получен из .env (локально) или из Docker-контейнера (на сервере)
-SSH_PASSWORD = os.getenv("SSH_PASSWORD")
-
+# --- КОНФИГУРАЦИЯ СЕРВЕРА ---
 # Директория с фотографиями на удаленном сервере
 REMOTE_PHOTO_DIR = "/var/www/html/extencion_photo/"
 
 # Базовый URL для прямых ссылок (для копирования)
 BASE_URL = "https://tropicbridge.site/extencion_photo/"
 
-# Размер миниатюр
-PREVIEW_SIZE = (150, 150)
+# Размеры миниатюр
+PREVIEW_SIZE = (200, 200)
+# --- КОНФИГУРАЦИЯ СЕРВЕРА ---
+
+# --- ПЕРЕМЕННЫЕ ОКРУЖЕНИЯ ---
+SSH_HOST = os.environ.get("SSH_HOST")
+SSH_USER = os.environ.get("SSH_USER")
+SSH_PASSWORD = os.environ.get("SSH_PASSWORD")
+
+# Настройки пагинации
 PAGE_SIZE = 20
 
-app = FastAPI()
+app = FastAPI(
+    title="Photo Manager API",
+    description="API для доступа к файлам по SFTP.",
+    version="1.0.0"
+)
 
-# --- Вспомогательная функция для SSH-подключения ---
-def get_ssh_client():
-    """Устанавливает и возвращает SSH-клиент, настроенный для подключения по паролю."""
-    if not SSH_PASSWORD:
-        raise HTTPException(status_code=500, detail="Ошибка конфигурации: Пароль SSH не установлен.")
 
-    client = paramiko.SSHClient()
-    # Автоматически добавлять ключ хоста (удобно для первого подключения)
-    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+# --- SSH/SFTP ---
+
+def get_sftp_client():
+    """Подключается к удаленному серверу по SFTP."""
+    if not all([SSH_HOST, SSH_USER, SSH_PASSWORD]):
+        raise Exception("SSH credentials are not set in environment variables.")
+
+    client = SSHClient()
+    client.set_missing_host_key_policy(AutoAddPolicy())
+    client.connect(hostname=SSH_HOST, username=SSH_USER, password=SSH_PASSWORD)
+    sftp = client.open_sftp()
+    return client, sftp
+
+
+# --- ЭНДПОИНТЫ ---
+
+@app.get("/api/list", response_model=dict)
+async def list_files(page: int = Query(1, ge=1), query: str = Query("")):
+    client, sftp = None, None
     try:
-        client.connect(hostname=SSH_HOST, username=SSH_USER, password=SSH_PASSWORD, timeout=10)
-        return client
-    except Exception as e:
-        print(f"Ошибка SSH-подключения: {e}")
-        # Возвращаем 503, если не можем подключиться к серверу с фото
-        raise HTTPException(status_code=503, detail="Ошибка подключения к серверу с фотографиями.")
+        client, sftp = get_sftp_client()
 
-# --- Эндпоинт: Получение списка файлов с пагинацией и поиском ---
-@app.get("/api/list")
-def get_file_list(page: int = 1, query: str = ""):
-    """Возвращает пагинированный и отфильтрованный список файлов."""
-    client = None
-    try:
-        client = get_ssh_client()
-        sftp = client.open_sftp()
+        # Получаем полный список файлов (игнорируем папки)
+        file_list = [
+            f.filename for f in sftp.listdir_attr(REMOTE_PHOTO_DIR)
+            if f.st_mode is not None and not (f.st_mode & 0o40000)
+        ]
 
-        all_files = sftp.listdir(REMOTE_PHOTO_DIR)
+        # Фильтрация по запросу
+        if query:
+            query_lower = query.lower()
+            file_list = [f for f in file_list if query_lower in f.lower()]
 
-        # Фильтрация (поиск) и исключение скрытых файлов
-        filtered_files = [f for f in all_files if not f.startswith('.') and f.lower().find(query.lower()) != -1]
-        filtered_files.sort()
+        file_list.sort(key=lambda f: f.lower())
+
+        total_files = len(file_list)
+        total_pages = (total_files + PAGE_SIZE - 1) // PAGE_SIZE
 
         # Пагинация
-        total_files = len(filtered_files)
         start = (page - 1) * PAGE_SIZE
         end = start + PAGE_SIZE
+        paged_list = file_list[start:end]
 
-        paginated_files = filtered_files[start:end]
+        files_data = []
+        for filename in paged_list:
+            # URL-кодирование для корректной передачи кириллицы в ссылках
+            encoded_name = filename.encode('utf-8').decode('latin-1').replace(' ', '%20')
 
-        file_list = []
-        for filename in paginated_files:
-            # URL-кодирование для корректной передачи пробелов/спецсимволов в ссылках
-            encoded_filename = quote(filename)
-
-            file_list.append({
+            files_data.append({
                 "name": filename,
-                "https_url": f"{BASE_URL}{encoded_filename}",
-                # Ссылка на миниатюру через наш API (по ней расширение запросит превью)
-                "preview_url": app.url_path_for("get_preview", filename=encoded_filename)
+                "https_url": f"{BASE_URL}{encoded_name}",
+                "preview_url": f"/api/preview/{encoded_name}"
             })
 
-        return JSONResponse(content={
-            "files": file_list,
+        return {
+            "files": files_data,
             "total_files": total_files,
-            "total_pages": (total_files + PAGE_SIZE - 1) // PAGE_SIZE,
+            "total_pages": total_pages,
             "current_page": page
-        })
+        }
 
+    except Exception as e:
+        print(f"Error listing files: {e}")
+        return {"detail": str(e)}
     finally:
+        if sftp:
+            sftp.close()
         if client:
             client.close()
 
-# --- Эндпоинт: Генерация и отдача миниатюр ---
-@app.get("/api/preview/{filename}", response_class=StreamingResponse, name="get_preview")
-def get_preview(filename: str):
-    """Отдает сгенерированную миниатюру изображения."""
-    client = None
+
+@app.get("/api/preview/{filename:path}")
+async def get_photo_preview(filename: str, download: bool = Query(False)):  # ДОБАВЛЕНО: параметр download
+    client, sftp = None, None
     try:
-        client = get_ssh_client()
-        sftp = client.open_sftp()
+        # 1. Раскодирование имени файла (обратное действие к кодированию в list_files)
+        # Учитываем, что Nginx декодирует URL, а FastAPI — нет.
+        # Nginx/FastAPI декодирует %20 в пробел, поэтому ' ' в имени файла остается.
+        decoded_filename = filename.replace('%20', ' ')
 
-        # Декодируем имя файла, которое пришло из URL
-        decoded_filename = unquote(filename)
-
+        # 2. Подключение и чтение
+        client, sftp = get_sftp_client()
         remote_path = os.path.join(REMOTE_PHOTO_DIR, decoded_filename)
 
-        # 1. Скачиваем файл в буфер в памяти
         file_buffer = BytesIO()
         sftp.getfo(remote_path, file_buffer)
         file_buffer.seek(0)
 
-        # 2. Обработка изображения и генерация превью
-        img = Image.open(file_buffer)
-        img.thumbnail(PREVIEW_SIZE)
+        # 3. Обработка изображения (миниатюра или полный размер)
+        content = file_buffer.getvalue()
+        media_type, _ = mimetypes.guess_type(decoded_filename)
 
-        # Сохраняем миниатюру в новый буфер
-        output_buffer = BytesIO()
-        img.save(output_buffer, format="JPEG")
-        output_buffer.seek(0)
+        if not download and media_type and media_type.startswith('image/'):
+            # Создание миниатюры только для предпросмотра (если это не запрос на скачивание)
+            try:
+                img = Image.open(file_buffer)
+                img.thumbnail(PREVIEW_SIZE)
 
-        # 3. Отдаем как стриминговый ответ
-        return StreamingResponse(
-            output_buffer,
-            media_type="image/jpeg",
-            # Кэшируем превью в браузере на 24 часа
-            headers={"Cache-Control": "public, max-age=86400"}
-        )
+                output = BytesIO()
+                img.save(output, format=img.format if img.format else 'PNG')
+                content = output.getvalue()
+            except Exception as thumbnail_error:
+                print(f"Error creating thumbnail for {decoded_filename}: {thumbnail_error}")
+                # Если миниатюра не создана, возвращаем полный файл
+                file_buffer.seek(0)
+                content = file_buffer.getvalue()
+
+        # 4. Установка заголовков
+        headers = None
+        if download:
+            # Устанавливаем заголовок Content-Disposition для принудительного скачивания
+            headers = {
+                "Content-Disposition": f"attachment; filename=\"{decoded_filename}\""
+            }
+
+        return Response(content=content, media_type=media_type, headers=headers)
 
     except FileNotFoundError:
-        raise HTTPException(status_code=404, detail="Файл не найден на сервере.")
+        return Response(status_code=404, content={"detail": "File not found"})
     except Exception as e:
-        print(f"Ошибка при обработке превью: {e}")
-        # Ловим ошибки, связанные с чтением изображений (например, если файл не JPEG)
-        raise HTTPException(status_code=500, detail="Ошибка обработки изображения.")
+        print(f"Error retrieving file: {e}")
+        return Response(status_code=500, content={"detail": f"Internal Server Error: {e}"})
     finally:
+        if sftp:
+            sftp.close()
         if client:
             client.close()
-
-
-if __name__ == "__main__":
-    # Код для удобного локального запуска
-    import uvicorn
-    # Локальный запуск на порту 8000
-    uvicorn.run(app, host="0.0.0.0", port=8000)

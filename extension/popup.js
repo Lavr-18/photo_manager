@@ -15,12 +15,11 @@ async function loadPhotos(page, query) {
     messageElement.textContent = 'Загрузка...';
     grid.innerHTML = '';
 
-    // Запрос теперь идет к API_BASE_URL + /api/list
     try {
+        // Запрос к API_BASE_URL + /api/list
         const response = await fetch(`${API_BASE_URL}/api/list?page=${page}&query=${query}`);
 
         if (!response.ok) {
-            // Если API вернуло ошибку 500/503
             const errorBody = await response.json();
             throw new Error(errorBody.detail || `Ошибка API: ${response.status}`);
         }
@@ -56,7 +55,6 @@ function createPhotoElement(file) {
 
     // Изображение
     const img = document.createElement('img');
-    // img.src теперь: API_BASE_URL (без /api) + /api/preview/...
     img.src = `${API_BASE_URL}${file.preview_url}`;
     img.alt = file.name;
     item.appendChild(img);
@@ -71,17 +69,24 @@ function createPhotoElement(file) {
     const actions = document.createElement('div');
     actions.className = 'actions';
 
-    // Кнопка 1: Копировать ссылку
+    // Кнопка 1: Копировать ссылку (Остается)
     const copyLinkBtn = document.createElement('button');
     copyLinkBtn.textContent = '🔗 Ссылка';
     copyLinkBtn.onclick = () => copyTextToClipboard(file.https_url);
     actions.appendChild(copyLinkBtn);
 
-    // Кнопка 2: Скачать (ЗАМЕНА)
+    // Кнопка 2: Скопировать фото (Возвращена)
+    const copyImageBtn = document.createElement('button');
+    copyImageBtn.textContent = '🖼️ Фото';
+    copyImageBtn.onclick = () => copyImageToClipboard(file.https_url);
+    actions.appendChild(copyImageBtn);
+
+    // Кнопка 3: Скачать фото (Новая, надежная)
     const downloadBtn = document.createElement('button');
     downloadBtn.textContent = '⬇️ Скачать';
-    // Вызываем функцию downloadFile, используя оригинальный HTTPS URL
-    downloadBtn.onclick = () => downloadFile(file.https_url, file.name);
+    // Используем API_BASE_URL + preview_url + ?download=true
+    const downloadUrl = `${API_BASE_URL}${file.preview_url}?download=true`;
+    downloadBtn.onclick = () => downloadFile(downloadUrl, file.name);
     actions.appendChild(downloadBtn);
 
     item.appendChild(actions);
@@ -103,17 +108,40 @@ function copyTextToClipboard(text) {
         });
 }
 
-// Новая функция: Скачивание файла
+// Копирование изображения в буфер обмена (ВОЗВРАЩЕНА)
+async function copyImageToClipboard(imageUrl) {
+    try {
+        messageElement.textContent = 'Загружаю для копирования...';
+
+        // 1. Получаем изображение как Blob с его оригинального HTTPS URL
+        // ВНИМАНИЕ: Это может быть заблокировано CORS, так как https://tropicbridge.site/ - это внешний домен
+        const response = await fetch(imageUrl);
+        if (!response.ok) throw new Error("Не удалось загрузить изображение.");
+
+        const imageBlob = await response.blob();
+
+        // 2. Используем Clipboard API
+        const item = new ClipboardItem({ [imageBlob.type]: imageBlob });
+        await navigator.clipboard.write([item]);
+
+        messageElement.textContent = 'Фото скопировано!';
+        setTimeout(() => messageElement.textContent = '', 2000);
+
+    } catch (err) {
+        console.error('Ошибка копирования фото:', err);
+        messageElement.textContent = 'Ошибка копирования фото. Домен не разрешает (CORS)!';
+    }
+}
+
+// Функция: Скачивание файла (ИСПРАВЛЕНА, использует API-эндпоинт)
 function downloadFile(url, filename) {
     try {
         messageElement.textContent = 'Инициирую скачивание...';
 
-        // Создаем временную ссылку
         const link = document.createElement('a');
         link.href = url;
-        link.download = filename; // Устанавливаем имя файла
+        link.download = filename;
 
-        // Добавляем ссылку в DOM, кликаем по ней и удаляем
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
