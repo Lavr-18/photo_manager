@@ -20,9 +20,11 @@ SSH_USER = os.getenv("SSH_USER")
 SSH_PASSWORD = os.getenv("SSH_PASSWORD")
 
 # Директория с фотографиями на удаленном сервере
-REMOTE_PHOTO_DIR = "/var/www/html/telegram_exports/"
+REMOTE_PHOTO_DIR = "/var/www/html/extencion_photo/"
+
 # Базовый URL для прямых ссылок (для копирования)
-BASE_URL = "https://tropicbridge.site/telegram_exports/"
+BASE_URL = "https://tropicbridge.site/extencion_photo/"
+
 # Размер миниатюр
 PREVIEW_SIZE = (150, 150)
 PAGE_SIZE = 20
