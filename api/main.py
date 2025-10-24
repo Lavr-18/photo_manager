@@ -5,7 +5,7 @@ from paramiko import SSHClient, AutoAddPolicy
 from io import BytesIO
 from PIL import Image
 import mimetypes
-from urllib.parse import unquote  # <--- ДОБАВЛЕН ИМПОРТ
+from urllib.parse import unquote, quote  # <--- ДОБАВЛЕН ИМПОРТ quote
 
 # --- КОНФИГУРАЦИЯ СЕРВЕРА ---
 # Директория с фотографиями на удаленном сервере
@@ -78,12 +78,7 @@ async def list_files(page: int = Query(1, ge=1), query: str = Query("")):
 
         files_data = []
         for filename in paged_list:
-            # URL-кодирование для корректной передачи кириллицы в ссылках (для extension/popup.js)
-            # Мы используем кодирование UTF-8, чтобы избежать проблем с Latin-1
-            encoded_name = filename.encode('utf-8').hex().upper()
-
-            # Более простой способ кодирования (просто URL-кодирование)
-            from urllib.parse import quote
+            # ИСПРАВЛЕНИЕ: Используем стандартный URL-кодировщик (quote)
             encoded_name = quote(filename, safe='')
 
             files_data.append({
@@ -114,7 +109,7 @@ async def get_photo_preview(filename: str, download: bool = Query(False)):
     client, sftp = None, None
     try:
         # 1. Корректное декодирование имени файла
-        # ИСПРАВЛЕНО: Используем unquote для обратного URL-декодирования.
+        # Используем unquote для обратного URL-декодирования.
         decoded_filename = unquote(filename)
 
         # 2. Подключение и чтение
@@ -155,11 +150,11 @@ async def get_photo_preview(filename: str, download: bool = Query(False)):
         return Response(content=content, media_type=media_type, headers=headers)
 
     except FileNotFoundError:
-        # ИСПРАВЛЕНО: Возвращаем JSONResponse со строкой
+        # Возвращаем JSONResponse со строкой
         return Response(status_code=404, content='{"detail": "File not found"}', media_type="application/json")
     except Exception as e:
         print(f"Error retrieving file: {e}")
-        # ИСПРАВЛЕНО: Возвращаем JSONResponse со строкой
+        # Возвращаем JSONResponse со строкой
         return Response(status_code=500, content='{"detail": "Internal Server Error"}', media_type="application/json")
     finally:
         if sftp:
