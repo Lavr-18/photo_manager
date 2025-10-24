@@ -74,13 +74,6 @@ function createPhotoElement(file) {
     copyLinkBtn.onclick = () => copyTextToClipboard(file.https_url);
     actions.appendChild(copyLinkBtn);
 
-    // Кнопка 2: Скопировать фото (ОБНОВЛЕНО: Используем API URL)
-    const copyImageBtn = document.createElement('button');
-    copyImageBtn.textContent = '🖼️ Фото';
-    const copyApiUrl = `${API_BASE_URL}${file.preview_url}`;
-    copyImageBtn.onclick = () => copyImageToClipboard(copyApiUrl);
-    actions.appendChild(copyImageBtn);
-
     // Кнопка 3: Скачать фото
     const downloadBtn = document.createElement('button');
     downloadBtn.textContent = '⬇️ Скачать';
@@ -107,28 +100,6 @@ function copyTextToClipboard(text) {
         });
 }
 
-// Копирование изображения в буфер обмена (ОБНОВЛЕНО)
-async function copyImageToClipboard(apiUrl) {
-    try {
-        messageElement.textContent = 'Загружаю для копирования...';
-
-        // Получаем изображение с НАШЕГО API (обходит CORS)
-        const response = await fetch(apiUrl);
-        if (!response.ok) throw new Error("Не удалось загрузить изображение с API.");
-
-        const imageBlob = await response.blob();
-
-        const item = new ClipboardItem({ [imageBlob.type]: imageBlob });
-        await navigator.clipboard.write([item]);
-
-        messageElement.textContent = 'Фото скопировано!';
-        setTimeout(() => messageElement.textContent = '', 2000);
-
-    } catch (err) {
-        console.error('Ошибка копирования фото:', err);
-        messageElement.textContent = 'Ошибка копирования фото!';
-    }
-}
 
 // Функция: Скачивание файла
 function downloadFile(url, filename) {
