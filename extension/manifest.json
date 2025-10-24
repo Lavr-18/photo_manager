@@ -11,6 +11,7 @@
         "clipboardWrite"
     ],
     "host_permissions": [
-        "http://127.0.0.1:8000/"
+        "http://37.220.81.157:8088/*",
+        "https://tropicbridge.site/*"
     ]
 }

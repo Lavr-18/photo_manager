@@ -5,7 +5,7 @@ from paramiko import SSHClient, AutoAddPolicy
 from io import BytesIO
 from PIL import Image
 import mimetypes
-from urllib.parse import unquote, quote  # <--- ДОБАВЛЕН ИМПОРТ quote
+from urllib.parse import unquote, quote  # <--- ДОБАВЛЕН ИМПОРТ в начало файла
 
 # --- КОНФИГУРАЦИЯ СЕРВЕРА ---
 # Директория с фотографиями на удаленном сервере
@@ -78,7 +78,7 @@ async def list_files(page: int = Query(1, ge=1), query: str = Query("")):
 
         files_data = []
         for filename in paged_list:
-            # ИСПРАВЛЕНИЕ: Используем стандартный URL-кодировщик (quote)
+            # Используем quote для URL-кодирования
             encoded_name = quote(filename, safe='')
 
             files_data.append({
@@ -109,7 +109,7 @@ async def get_photo_preview(filename: str, download: bool = Query(False)):
     client, sftp = None, None
     try:
         # 1. Корректное декодирование имени файла
-        # Используем unquote для обратного URL-декодирования.
+        # Используем unquote для обратного URL-декодирования
         decoded_filename = unquote(filename)
 
         # 2. Подключение и чтение
