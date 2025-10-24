@@ -104,13 +104,15 @@ async def list_files(page: int = Query(1, ge=1), query: str = Query("")):
 
 
 @app.get("/api/preview/{filename:path}")
-async def get_photo_preview(filename: str, download: bool = Query(False)):  # ДОБАВЛЕНО: параметр download
+async def get_photo_preview(filename: str, download: bool = Query(False)):
     client, sftp = None, None
     try:
-        # 1. Раскодирование имени файла (обратное действие к кодированию в list_files)
-        # Учитываем, что Nginx декодирует URL, а FastAPI — нет.
-        # Nginx/FastAPI декодирует %20 в пробел, поэтому ' ' в имени файла остается.
-        decoded_filename = filename.replace('%20', ' ')
+        # 1. Корректное декодирование имени файла
+        # Обратное декодирование URL-encoded строки для получения имени файла
+        # ИСПРАВЛЕНО: Правильное декодирование для Paramiko.
+        # Paramiko не может обработать кириллицу в пути без правильного декодирования.
+        # Мы используем latin-1, потому что ранее закодировали в latin-1.
+        decoded_filename = filename.encode('latin-1').decode('utf-8').replace('%20', ' ')
 
         # 2. Подключение и чтение
         client, sftp = get_sftp_client()
@@ -125,7 +127,7 @@ async def get_photo_preview(filename: str, download: bool = Query(False)):  # Д
         media_type, _ = mimetypes.guess_type(decoded_filename)
 
         if not download and media_type and media_type.startswith('image/'):
-            # Создание миниатюры только для предпросмотра (если это не запрос на скачивание)
+            # Создание миниатюры только для предпросмотра
             try:
                 img = Image.open(file_buffer)
                 img.thumbnail(PREVIEW_SIZE)
@@ -150,10 +152,12 @@ async def get_photo_preview(filename: str, download: bool = Query(False)):  # Д
         return Response(content=content, media_type=media_type, headers=headers)
 
     except FileNotFoundError:
-        return Response(status_code=404, content={"detail": "File not found"})
+        # ИСПРАВЛЕНО: Возвращаем JSONResponse или Response со строкой, а не словарь
+        return Response(status_code=404, content='{"detail": "File not found"}', media_type="application/json")
     except Exception as e:
         print(f"Error retrieving file: {e}")
-        return Response(status_code=500, content={"detail": f"Internal Server Error: {e}"})
+        # ИСПРАВЛЕНО: Возвращаем JSONResponse или Response со строкой, а не словарь
+        return Response(status_code=500, content='{"detail": "Internal Server Error"}', media_type="application/json")
     finally:
         if sftp:
             sftp.close()
