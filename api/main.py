@@ -145,12 +145,18 @@ async def get_photo_preview(filename: str, download: bool = Query(False)):
         headers = None
         if download:
             # ИСПРАВЛЕНИЕ 'latin-1' ОШИБКИ:
-            # Используем RFC 5987 (filename*) для правильного кодирования кириллицы в заголовке Content-Disposition.
-            # quote(decoded_filename, safe='') гарантирует, что имя файла будет корректно URL-закодировано для заголовка.
-            encoded_header_filename = quote(decoded_filename, safe='')
+            # Для 'filename*' используется стандартное URL-кодирование, совместимое с RFC 5987.
+            encoded_header_filename = quote(decoded_filename)
+
+            # Для 'filename' (fallback) создается ASCII-версия имени файла.
+            # Это предотвращает ошибку кодировки 'latin-1' в Starlette.
+            ascii_fallback_filename = decoded_filename.encode('ascii', 'ignore').decode('ascii')
+            # Если имя файла состояло только из не-ASCII символов, предоставляем общее имя.
+            if not ascii_fallback_filename:
+                ascii_fallback_filename = "download"
 
             headers = {
-                "Content-Disposition": f"attachment; filename=\"{decoded_filename}\"; filename*=utf-8''{encoded_header_filename}"
+                "Content-Disposition": f"attachment; filename=\"{ascii_fallback_filename}\"; filename*=utf-8''{encoded_header_filename}"
             }
 
         # Если тип MIME не определен, используем 'application/octet-stream' для бинарных данных
