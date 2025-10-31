@@ -5,6 +5,7 @@ from paramiko import SSHClient, AutoAddPolicy
 from io import BytesIO
 from PIL import Image
 import mimetypes
+import random
 from urllib.parse import unquote, quote  # Импорт для корректной работы с кириллицей в URL
 
 # --- КОНФИГУРАЦИЯ СЕРВЕРА ---
@@ -82,10 +83,13 @@ async def list_files(page: int = Query(1, ge=1), query: str = Query("")):
             # Используем quote для URL-кодирования имени файла, чтобы избежать ошибок
             encoded_name = quote(filename, safe='')
 
+            price = f"{random.randint(100, 9999) * 10:,} ₽".replace(",", " ")
+
             files_data.append({
                 "name": filename,
                 "https_url": f"{BASE_URL}{encoded_name}",
-                "preview_url": f"/api/preview/{encoded_name}"
+                "preview_url": f"/api/preview/{encoded_name}",
+                "price": price
             })
 
         return {

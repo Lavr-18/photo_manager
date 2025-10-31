@@ -58,25 +58,49 @@ function createPhotoElement(file) {
     img.alt = file.name;
     item.appendChild(img);
 
-    // Имя файла
+    // Имя файла (Без обрезки)
     const name = document.createElement('p');
+    name.className = 'item-name';
     name.textContent = file.name;
     name.title = file.name;
     item.appendChild(name);
+
+    // Цена (Отображение)
+    const price = document.createElement('p');
+    price.className = 'item-price';
+    price.textContent = file.price;
+    item.appendChild(price);
 
     // Кнопки действий
     const actions = document.createElement('div');
     actions.className = 'actions';
 
-    // Кнопка 1: Копировать ссылку
+    // Кнопка 1: Копировать цену
+    const copyPriceBtn = document.createElement('button');
+    copyPriceBtn.textContent = '₽ Цена';
+    copyPriceBtn.className = 'small-btn';
+    copyPriceBtn.onclick = () => copyTextToClipboard(file.price, 'Цена скопирована!');
+    actions.appendChild(copyPriceBtn);
+
+    // Кнопка 2: Копировать название и цену
+    const copyNamePriceBtn = document.createElement('button');
+    copyNamePriceBtn.textContent = '📝 Название + ₽';
+    copyNamePriceBtn.className = 'small-btn';
+    const namePriceText = `${file.name} - ${file.price}`;
+    copyNamePriceBtn.onclick = () => copyTextToClipboard(namePriceText, 'Название и цена скопированы!');
+    actions.appendChild(copyNamePriceBtn);
+
+    // Кнопка 3: Копировать ссылку
     const copyLinkBtn = document.createElement('button');
     copyLinkBtn.textContent = '🔗 Ссылка';
-    copyLinkBtn.onclick = () => copyTextToClipboard(file.https_url);
+    copyLinkBtn.className = 'small-btn';
+    copyLinkBtn.onclick = () => copyTextToClipboard(file.https_url, 'Ссылка скопирована!');
     actions.appendChild(copyLinkBtn);
 
-    // Кнопка 3: Скачать фото
+    // Кнопка 4: Скачать фото
     const downloadBtn = document.createElement('button');
     downloadBtn.textContent = '⬇️ Скачать';
+    downloadBtn.className = 'small-btn';
     const downloadUrl = `${API_BASE_URL}${file.preview_url}?download=true`;
     downloadBtn.onclick = () => downloadFile(downloadUrl, file.name);
     actions.appendChild(downloadBtn);
@@ -87,15 +111,15 @@ function createPhotoElement(file) {
 
 // --- 3. Функции копирования/скачивания ---
 
-// Копирование текста в буфер обмена
-function copyTextToClipboard(text) {
+// Копирование текста в буфер обмена (ОБНОВЛЕНА)
+function copyTextToClipboard(text, successMessage = 'Текст скопирован!') {
     navigator.clipboard.writeText(text)
         .then(() => {
-            messageElement.textContent = 'Ссылка скопирована!';
+            messageElement.textContent = successMessage;
             setTimeout(() => messageElement.textContent = '', 2000);
         })
         .catch(err => {
-            console.error('Ошибка копирования ссылки:', err);
+            console.error('Ошибка копирования:', err);
             messageElement.textContent = 'Ошибка копирования!';
         });
 }
