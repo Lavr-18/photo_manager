@@ -61,10 +61,13 @@ async def get_price_from_moysklad(product_name: str) -> str:
         print("Warning: MOYSKLAD_API_TOKEN not set. Returning 'Нет данных'")
         return "Нет данных"
 
-    # 1. Формирование URL-запроса с фильтром по названию
-    params = {
-        "filter": f"name={product_name}"
-    }
+    # 1. ИСПРАВЛЕНИЕ: Вручную URL-кодируем название товара, используя quote.
+    # Это предотвращает попытку httpx закодировать кириллицу через ASCII.
+    encoded_product_name = quote(product_name)
+
+    # 2. Формируем строку запроса filter=name=...
+    query_string = f"filter=name={encoded_product_name}"
+
     headers = {
         "Authorization": f"Bearer {MOYSKLAD_API_TOKEN}",
         "Accept-Encoding": "gzip"
@@ -72,10 +75,11 @@ async def get_price_from_moysklad(product_name: str) -> str:
 
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
+            # 3. ИЗМЕНЕНИЕ: Вместо 'params' используем 'url' и передаем строку запроса
             response = await client.get(
-                MOYSKLAD_API_URL,
-                params=params,
+                f"{MOYSKLAD_API_URL}?{query_string}",  # Передаем URL с закодированной строкой
                 headers=headers
+                # params=params # Эту строку убираем, так как она вызывает ошибку кодировки
             )
             response.raise_for_status()  # Вызывает исключение для 4xx/5xx ответов
 
