@@ -10,24 +10,20 @@ import mimetypes
 from urllib.parse import unquote, quote
 
 # --- КОНФИГУРАЦИЯ СЕРВЕРА ---
-# Директория с фотографиями на удаленном сервере
 REMOTE_PHOTO_DIR = "/var/www/html/extencion_photo/"
-
-# Базовый URL для прямых ссылок (для копирования)
-# ИЗМЕНЕНО: Добавлен порт 8443
 BASE_URL = "https://tropicbridge.site:8443/extencion_photo/"
-
-# Размеры миниатюр
 PREVIEW_SIZE = (200, 200)
 
 # --- КОНФИГУРАЦИЯ MOYSKLAD ---
 MOYSKLAD_API_URL = "https://api.moysklad.ru/api/remap/1.2/entity/product"
+MOYSKLAD_STOCK_URL = "https://api.moysklad.ru/api/remap/1.2/report/stock/all"
+STOCK_LIMIT = 1000  # Лимит пагинации для отчета по остаткам
 
 # --- ПЕРЕМЕННЫЕ ОКРУЖЕНИЯ ---
 SSH_HOST = os.environ.get("SSH_HOST")
 SSH_USER = os.environ.get("SSH_USER")
 SSH_PASSWORD = os.environ.get("SSH_PASSWORD")
-MOYSKLAD_API_TOKEN = os.environ.get("MOYSKLAD_API_TOKEN")  # Токен для МойСклад
+MOYSKLAD_API_TOKEN = os.environ.get("MOYSKLAD_API_TOKEN")
 
 # Настройки пагинации
 PAGE_SIZE = 20
@@ -60,14 +56,12 @@ def rotate_by_exif(img: Image) -> Image:
     Автоматически поворачивает изображение на основе его EXIF-данных (тег 274: Orientation).
     """
     try:
-        # Тег 274: Orientation
         exif = img._getexif()
         if exif is None:
             return img
 
         orientation = exif.get(0x0112)
 
-        # Применяем преобразования в зависимости от значения ориентации
         if orientation == 2:
             img = img.transpose(Image.FLIP_LEFT_RIGHT)
         elif orientation == 3:
@@ -75,26 +69,25 @@ def rotate_by_exif(img: Image) -> Image:
         elif orientation == 4:
             img = img.transpose(Image.FLIP_TOP_BOTTOM)
         elif orientation == 5:
-            img = img.transpose(Image.TRANSPOSE)  # 90 degrees counter-clockwise and flip vertically
+            img = img.transpose(Image.TRANSPOSE)
         elif orientation == 6:
-            img = img.transpose(Image.ROTATE_270)  # 270 degrees clockwise
+            img = img.transpose(Image.ROTATE_270)
         elif orientation == 7:
-            img = img.transpose(Image.TRANSVERSE)  # 90 degrees clockwise and flip vertically
+            img = img.transpose(Image.TRANSVERSE)
         elif orientation == 8:
-            img = img.transpose(Image.ROTATE_90)  # 90 degrees clockwise
+            img = img.transpose(Image.ROTATE_90)
 
-        # Очищаем EXIF-данные, чтобы избежать двойного поворота в браузере
+        # Очищаем EXIF-данные
         if orientation:
             img.info['exif'] = None
 
     except Exception as e:
-        # Игнорируем ошибки, если EXIF-данные повреждены или отсутствуют
         print(f"Error during EXIF rotation: {e}")
 
     return img
 
 
-# --- ФУНКЦИЯ ПОЛУЧЕНИЯ ЦЕНЫ ИЗ МОЙСКЛАД ---
+# --- ФУНКЦИИ МОЙСКЛАД ---
 
 async def get_price_from_moysklad(product_name: str) -> str:
     """Получает цену товара из МойСклад по его названию."""
@@ -102,10 +95,8 @@ async def get_price_from_moysklad(product_name: str) -> str:
         print("Warning: MOYSKLAD_API_TOKEN not set. Returning 'Нет данных'")
         return "Нет данных"
 
-    # 1. ИСПРАВЛЕНИЕ: Вручную URL-кодируем название товара, используя quote.
+    # Вручную URL-кодируем название товара
     encoded_product_name = quote(product_name)
-
-    # 2. Формируем строку запроса filter=name=...
     query_string = f"filter=name={encoded_product_name}"
 
     headers = {
@@ -115,7 +106,7 @@ async def get_price_from_moysklad(product_name: str) -> str:
 
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
-            # 3. ИЗМЕНЕНИЕ: Используем URL с закодированной строкой, а не словарь params
+            # Используем URL с закодированной строкой
             response = await client.get(
                 f"{MOYSKLAD_API_URL}?{query_string}",
                 headers=headers
@@ -124,13 +115,11 @@ async def get_price_from_moysklad(product_name: str) -> str:
 
         data = response.json()
 
-        # 2. Извлечение цены из ответа (rows[0].salePrices[0].value)
         if data.get('rows') and len(data['rows']) > 0:
             row = data['rows'][0]
             if row.get('salePrices') and len(row['salePrices']) > 0:
                 price_value = row['salePrices'][0].get('value')
 
-                # Цена в МойСклад хранится в копейках. Делим на 100 и форматируем.
                 if price_value is not None:
                     price_rub = round(price_value / 100)
                     return f"{price_rub:,} ₽".replace(",", " ")
@@ -145,13 +134,87 @@ async def get_price_from_moysklad(product_name: str) -> str:
         return "Ошибка"
 
 
+async def get_all_stock_data() -> dict[str, float]:
+    """
+    Получает полный отчет по остаткам с пагинацией и возвращает словарь
+    {название_товара: stock}.
+    """
+    if not MOYSKLAD_API_TOKEN:
+        print("Warning: MOYSKLAD_API_TOKEN not set for stock check.")
+        return {}
+
+    all_stock_rows = {}
+    offset = 0
+    total_size = float('inf')
+
+    headers = {
+        "Authorization": f"Bearer {MOYSKLAD_API_TOKEN}",
+        "Accept-Encoding": "gzip",
+        "Accept": "application/json"
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            while offset < total_size:
+                params = {
+                    "stockMode": "all",
+                    "limit": STOCK_LIMIT,
+                    "offset": offset
+                }
+
+                response = await client.get(
+                    MOYSKLAD_STOCK_URL,
+                    params=params,
+                    headers=headers
+                )
+                response.raise_for_status()
+                data = response.json()
+
+                rows = data.get('rows', [])
+                if not rows:
+                    break
+
+                if 'meta' in data and 'size' in data['meta']:
+                    total_size = data['meta']['size']
+
+                for row in rows:
+                    name = row.get('name')
+                    # Используем 'stock' (текущий остаток)
+                    stock = row.get('stock', 0)
+                    if name:
+                        # Используем очищенное название как ключ
+                        all_stock_rows[name.strip()] = stock
+
+                offset += STOCK_LIMIT
+
+        return all_stock_rows
+
+    except httpx.HTTPStatusError as e:
+        print(f"Moysklad Stock API Error ({e.response.status_code}): {e}")
+        return {}
+    except Exception as e:
+        print(f"Error fetching Moysklad stock data: {e}")
+        return {}
+
+
 # --- ЭНДПОИНТЫ ---
 
 @app.get("/api/list", response_model=dict)
-async def list_files(page: int = Query(1, ge=1), query: str = Query("")):
+async def list_files(
+        page: int = Query(1, ge=1),
+        query: str = Query(""),
+        in_stock: bool = Query(False)  # НОВЫЙ ПАРАМЕТР: фильтр по наличию
+):
     client, sftp = None, None
     try:
         client, sftp = get_sftp_client()
+
+        # 1. Если включен фильтр "В наличии", получаем полный отчет по остаткам
+        stock_data = {}
+        if in_stock:
+            print("Fetching all stock data for filtering...")
+            stock_data = await get_all_stock_data()
+            print(f"Stock data fetched. Total items: {len(stock_data)}")
 
         # Получаем полный список файлов (игнорируем папки)
         file_list = [
@@ -159,7 +222,21 @@ async def list_files(page: int = Query(1, ge=1), query: str = Query("")):
             if f.st_mode is not None and not (f.st_mode & 0o40000)
         ]
 
-        # Фильтрация по запросу
+        # 2. Фильтрация по наличию (in_stock)
+        if in_stock:
+            filtered_list = []
+            for filename in file_list:
+                # Извлекаем название товара и очищаем его, как для API
+                product_name_raw = os.path.splitext(filename)[0].strip()
+                moysklad_name = product_name_raw.replace('_', '/')
+
+                # Проверяем наличие: stock > 0
+                stock_value = stock_data.get(moysklad_name, 0)
+                if stock_value > 0:
+                    filtered_list.append(filename)
+            file_list = filtered_list
+
+        # 3. Фильтрация по запросу (query)
         if query:
             query_lower = query.lower()
             file_list = [f for f in file_list if query_lower in f.lower()]
@@ -176,24 +253,24 @@ async def list_files(page: int = Query(1, ge=1), query: str = Query("")):
 
         files_data = []
         for filename in paged_list:
-            # Используем quote для URL-кодирования имени файла
             encoded_name = quote(filename, safe='')
 
-            # 1. Извлекаем название товара: имя файла без расширения
-            # ИСПРАВЛЕНИЕ: Добавлен .strip() для удаления лишних пробелов
+            # Извлекаем название товара и чистим пробелы
             product_name = os.path.splitext(filename)[0].strip()
-
-            # 2. ИСПРАВЛЕНИЕ: Заменяем символ '_' на '/' для точного поиска в МойСклад
             moysklad_name = product_name.replace('_', '/')
 
-            # 3. Асинхронно получаем цену
+            # Асинхронно получаем цену
             price = await get_price_from_moysklad(moysklad_name)
+
+            # Получаем остаток (или 0, если stock_data не загружался/товара нет)
+            stock_value = stock_data.get(moysklad_name, 0)
 
             files_data.append({
                 "name": filename,
                 "https_url": f"{BASE_URL}{encoded_name}",
                 "preview_url": f"/api/preview/{encoded_name}",
-                "price": price
+                "price": price,
+                "stock": stock_value  # Добавляем текущий остаток
             })
 
         return {
@@ -217,10 +294,7 @@ async def list_files(page: int = Query(1, ge=1), query: str = Query("")):
 async def get_photo_preview(filename: str, download: bool = Query(False)):
     client, sftp = None, None
     try:
-        # 1. Корректное декодирование имени файла
         decoded_filename = unquote(filename)
-
-        # 2. Подключение и чтение
         client, sftp = get_sftp_client()
         remote_path = os.path.join(REMOTE_PHOTO_DIR, decoded_filename)
 
@@ -228,21 +302,20 @@ async def get_photo_preview(filename: str, download: bool = Query(False)):
         sftp.getfo(remote_path, file_buffer)
         file_buffer.seek(0)
 
-        # 3. Обработка изображения (миниатюра или полный размер)
         content = file_buffer.getvalue()
         media_type, _ = mimetypes.guess_type(decoded_filename)
 
         if not download and media_type and media_type.startswith('image/'):
-            # Создание миниатюры только для предпросмотра
             try:
                 img = Image.open(file_buffer)
 
-                # НОВОЕ ИСПРАВЛЕНИЕ: Коррекция ориентации на основе EXIF-данных
+                # ИСПРАВЛЕНИЕ: Коррекция ориентации на основе EXIF-данных
                 img = rotate_by_exif(img)
 
                 img.thumbnail(PREVIEW_SIZE)
 
                 output = BytesIO()
+                # img.format должен быть установлен Pillow при открытии
                 img.save(output, format=img.format if img.format else 'PNG')
                 content = output.getvalue()
             except Exception as thumbnail_error:
@@ -250,7 +323,6 @@ async def get_photo_preview(filename: str, download: bool = Query(False)):
                 file_buffer.seek(0)
                 content = file_buffer.getvalue()
 
-        # 4. Установка заголовков
         headers = None
         if download:
             encoded_header_filename = quote(decoded_filename)

@@ -2,21 +2,30 @@ const API_BASE_URL = "http://37.220.81.157:8088";
 let currentPage = 1;
 let currentQuery = "";
 let totalPages = 1;
+// НОВОЕ: Переменная состояния для фильтра по наличию
+let isStockFilterActive = false;
 
 const grid = document.getElementById('photos-grid');
 const searchInput = document.getElementById('search-input');
+// НОВОЕ: Чекбокс
+const stockCheckbox = document.getElementById('stock-filter-checkbox');
 const prevBtn = document.getElementById('prev-page');
 const nextBtn = document.getElementById('next-page');
 const pageInfo = document.getElementById('page-info');
 const messageElement = document.getElementById('message');
 
 // --- 1. Основная функция загрузки данных ---
-async function loadPhotos(page, query) {
+// Обновлена: принимает inStockFilter
+async function loadPhotos(page, query, inStockFilter) {
     messageElement.textContent = 'Загрузка...';
     grid.innerHTML = '';
 
+    // Формируем строку запроса с новым параметром
+    const stockParam = inStockFilter ? '&in_stock=true' : '';
+    const url = `${API_BASE_URL}/api/list?page=${page}&query=${query}${stockParam}`;
+
     try {
-        const response = await fetch(`${API_BASE_URL}/api/list?page=${page}&query=${query}`);
+        const response = await fetch(url);
 
         if (!response.ok) {
             const errorBody = await response.json();
@@ -50,7 +59,9 @@ async function loadPhotos(page, query) {
 // --- 2. Создание элемента фотографии и кнопок ---
 function createPhotoElement(file) {
     const item = document.createElement('div');
-    item.className = 'photo-item';
+    // Добавляем класс 'in-stock' если товар в наличии (stock > 0)
+    const isInStock = file.stock > 0;
+    item.className = `photo-item ${isInStock ? 'in-stock' : 'out-of-stock'}`;
 
     // Изображение
     const img = document.createElement('img');
@@ -58,18 +69,31 @@ function createPhotoElement(file) {
     img.alt = file.name;
     item.appendChild(img);
 
-    // Имя файла (Без обрезки)
+    // Имя файла
     const name = document.createElement('p');
     name.className = 'item-name';
     name.textContent = file.name;
     name.title = file.name;
     item.appendChild(name);
 
-    // Цена (Отображение)
-    const price = document.createElement('p');
-    price.className = 'item-price';
-    price.textContent = file.price;
-    item.appendChild(price);
+    // Цена и Остаток (НОВОЕ: Отображение остатка)
+    const priceStock = document.createElement('p');
+    priceStock.className = 'item-price-stock';
+
+    let stockText;
+    if (file.stock === undefined) {
+        // Если поле 'stock' не пришло (теоретически не должно быть после нашего фикса)
+        stockText = 'Нет данных';
+    } else if (file.stock > 0) {
+        stockText = `В наличии: ${Math.round(file.stock)}`;
+    } else {
+        stockText = 'Нет в наличии';
+    }
+
+    // Форматирование: Цена | Остаток
+    priceStock.textContent = `${file.price} | ${stockText}`;
+    item.appendChild(priceStock);
+
 
     // Кнопки действий
     const actions = document.createElement('div');
@@ -109,9 +133,9 @@ function createPhotoElement(file) {
     return item;
 }
 
-// --- 3. Функции копирования/скачивания ---
+// --- 3. Функции копирования/скачивания (без изменений) ---
 
-// Копирование текста в буфер обмена (ОБНОВЛЕНА)
+// Копирование текста в буфер обмена
 function copyTextToClipboard(text, successMessage = 'Текст скопирован!') {
     navigator.clipboard.writeText(text)
         .then(() => {
@@ -155,24 +179,32 @@ searchInput.addEventListener('input', () => {
     clearTimeout(searchTimeout);
     searchTimeout = setTimeout(() => {
         currentQuery = searchInput.value;
-        loadPhotos(1, currentQuery);
+        // НОВОЕ: Перезагружаем с 1 страницы, используя текущее состояние фильтра
+        loadPhotos(1, currentQuery, isStockFilterActive);
     }, 500);
 });
 
-// Пагинация
+// НОВОЕ: Обработчик для чекбокса "В наличии"
+stockCheckbox.addEventListener('change', () => {
+    isStockFilterActive = stockCheckbox.checked;
+    // НОВОЕ: Перезагружаем с 1 страницы, используя текущий запрос и новое состояние фильтра
+    loadPhotos(1, currentQuery, isStockFilterActive);
+});
+
+// Пагинация (Обновлена для использования isStockFilterActive)
 prevBtn.addEventListener('click', () => {
     if (currentPage > 1) {
-        loadPhotos(currentPage - 1, currentQuery);
+        loadPhotos(currentPage - 1, currentQuery, isStockFilterActive);
     }
 });
 
 nextBtn.addEventListener('click', () => {
     if (currentPage < totalPages) {
-        loadPhotos(currentPage + 1, currentQuery);
+        loadPhotos(currentPage + 1, currentQuery, isStockFilterActive);
     }
 });
 
-// Инициализация
+// Инициализация (Обновлена для использования isStockFilterActive)
 document.addEventListener('DOMContentLoaded', () => {
-    loadPhotos(currentPage, currentQuery);
+    loadPhotos(currentPage, currentQuery, isStockFilterActive);
 });

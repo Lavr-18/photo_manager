@@ -8,7 +8,15 @@
 <body>
     <div class="container">
         <h1>Фотоконтент</h1>
-        <input type="text" id="search-input" placeholder="Поиск по названию..." />
+        <div id="filter-controls">
+            <input type="text" id="search-input" placeholder="Поиск по названию..." />
+
+            <label class="stock-filter-label">
+                <input type="checkbox" id="stock-filter-checkbox">
+                В наличии
+            </label>
+            </div>
+
         <p id="message"></p>
 
         <div id="photos-grid">
