@@ -53,6 +53,47 @@ def get_sftp_client():
     return client, sftp
 
 
+# --- ФУНКЦИИ ОБРАБОТКИ ИЗОБРАЖЕНИЙ ---
+
+def rotate_by_exif(img: Image) -> Image:
+    """
+    Автоматически поворачивает изображение на основе его EXIF-данных (тег 274: Orientation).
+    """
+    try:
+        # Тег 274: Orientation
+        exif = img._getexif()
+        if exif is None:
+            return img
+
+        orientation = exif.get(0x0112)
+
+        # Применяем преобразования в зависимости от значения ориентации
+        if orientation == 2:
+            img = img.transpose(Image.FLIP_LEFT_RIGHT)
+        elif orientation == 3:
+            img = img.transpose(Image.ROTATE_180)
+        elif orientation == 4:
+            img = img.transpose(Image.FLIP_TOP_BOTTOM)
+        elif orientation == 5:
+            img = img.transpose(Image.TRANSPOSE)  # 90 degrees counter-clockwise and flip vertically
+        elif orientation == 6:
+            img = img.transpose(Image.ROTATE_270)  # 270 degrees clockwise
+        elif orientation == 7:
+            img = img.transpose(Image.TRANSVERSE)  # 90 degrees clockwise and flip vertically
+        elif orientation == 8:
+            img = img.transpose(Image.ROTATE_90)  # 90 degrees clockwise
+
+        # Очищаем EXIF-данные, чтобы избежать двойного поворота в браузере
+        if orientation:
+            img.info['exif'] = None
+
+    except Exception as e:
+        # Игнорируем ошибки, если EXIF-данные повреждены или отсутствуют
+        print(f"Error during EXIF rotation: {e}")
+
+    return img
+
+
 # --- ФУНКЦИЯ ПОЛУЧЕНИЯ ЦЕНЫ ИЗ МОЙСКЛАД ---
 
 async def get_price_from_moysklad(product_name: str) -> str:
@@ -62,7 +103,6 @@ async def get_price_from_moysklad(product_name: str) -> str:
         return "Нет данных"
 
     # 1. ИСПРАВЛЕНИЕ: Вручную URL-кодируем название товара, используя quote.
-    # Это предотвращает попытку httpx закодировать кириллицу через ASCII.
     encoded_product_name = quote(product_name)
 
     # 2. Формируем строку запроса filter=name=...
@@ -75,13 +115,12 @@ async def get_price_from_moysklad(product_name: str) -> str:
 
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
-            # 3. ИЗМЕНЕНИЕ: Вместо 'params' используем 'url' и передаем строку запроса
+            # 3. ИЗМЕНЕНИЕ: Используем URL с закодированной строкой, а не словарь params
             response = await client.get(
-                f"{MOYSKLAD_API_URL}?{query_string}",  # Передаем URL с закодированной строкой
+                f"{MOYSKLAD_API_URL}?{query_string}",
                 headers=headers
-                # params=params # Эту строку убираем, так как она вызывает ошибку кодировки
             )
-            response.raise_for_status()  # Вызывает исключение для 4xx/5xx ответов
+            response.raise_for_status()
 
         data = response.json()
 
@@ -93,7 +132,6 @@ async def get_price_from_moysklad(product_name: str) -> str:
 
                 # Цена в МойСклад хранится в копейках. Делим на 100 и форматируем.
                 if price_value is not None:
-                    # Форматирование: деление на 100, округление, добавление разделителя и знака валюты.
                     price_rub = round(price_value / 100)
                     return f"{price_rub:,} ₽".replace(",", " ")
 
@@ -142,6 +180,7 @@ async def list_files(page: int = Query(1, ge=1), query: str = Query("")):
             encoded_name = quote(filename, safe='')
 
             # 1. Извлекаем название товара: имя файла без расширения
+            # ИСПРАВЛЕНИЕ: Добавлен .strip() для удаления лишних пробелов
             product_name = os.path.splitext(filename)[0].strip()
 
             # 2. ИСПРАВЛЕНИЕ: Заменяем символ '_' на '/' для точного поиска в МойСклад
@@ -197,6 +236,10 @@ async def get_photo_preview(filename: str, download: bool = Query(False)):
             # Создание миниатюры только для предпросмотра
             try:
                 img = Image.open(file_buffer)
+
+                # НОВОЕ ИСПРАВЛЕНИЕ: Коррекция ориентации на основе EXIF-данных
+                img = rotate_by_exif(img)
+
                 img.thumbnail(PREVIEW_SIZE)
 
                 output = BytesIO()
