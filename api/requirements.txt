@@ -3,3 +3,4 @@ uvicorn
 paramiko
 Pillow
 python-dotenv
+httpx

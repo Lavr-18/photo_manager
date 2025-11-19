@@ -1,5 +1,10 @@
+/* Глобальная настройка для точного контроля ширины */
+* {
+    box-sizing: border-box;
+}
+
 body {
-    width: 600px; /* Увеличена ширина для размещения 3 карточек */
+    width: 590px; /* ИСПРАВЛЕНО: Точная ширина: 3*183.33 + 2*10 (gap) + 2*10 (padding) ≈ 590px */
     font-family: Arial, sans-serif;
     padding: 10px;
 }
@@ -26,6 +31,7 @@ h1 {
 #photos-grid {
     display: flex;
     flex-wrap: wrap;
+    /* Убедимся, что промежуток равен 10px, как и раньше */
     gap: 10px;
     max-height: 400px;
     overflow-y: auto;
@@ -33,7 +39,12 @@ h1 {
 }
 
 .photo-item {
-    width: 185px; /* Ширина для 3 карточек в ряд (с учетом 10px gap и 600px body) */
+    /* ИСПРАВЛЕНО: Использование calc() для точного деления на три.
+       570px (ширина контейнера) / 3 = 190px.
+       190px - 10px (компенсация gap для первого элемента) / 3 * 2 = 183.33px.
+       Используем 183px для надежности. */
+    width: calc((100% - 20px) / 3);
+
     border: 1px solid #ddd;
     padding: 5px;
     border-radius: 4px;
@@ -48,14 +59,14 @@ h1 {
     margin-bottom: 5px;
 }
 
-/* Стили для названия товара - УДАЛЕНИЕ ОБРЕЗКИ */
+/* Стили для названия товара - БЕЗ ОБРЕЗКИ */
 .photo-item p.item-name {
     font-size: 0.9em;
     margin: 3px 0;
-    overflow: visible; /* Разрешает перенос строк */
-    white-space: normal; /* Разрешает перенос строк */
+    overflow: visible;
+    white-space: normal;
     text-overflow: clip;
-    min-height: 3.5em; /* Минимальная высота, чтобы карточки были одинаковыми */
+    min-height: 3.5em;
 }
 
 /* Стили для цены */
@@ -70,13 +81,13 @@ h1 {
 /* Стили для кнопок */
 .actions {
     display: flex;
-    flex-wrap: wrap; /* Разрешает кнопкам переноситься */
+    flex-wrap: wrap;
     gap: 3px;
     margin-top: 5px;
 }
 
 .actions button.small-btn {
-    flex: 1 1 calc(50% - 3px); /* Делает 2 кнопки в ряд */
+    flex: 1 1 calc(50% - 3px);
     padding: 5px 3px;
     cursor: pointer;
     background-color: #007bff;
@@ -84,7 +95,7 @@ h1 {
     border: none;
     border-radius: 3px;
     font-size: 0.7em;
-    line-height: 1; /* Улучшаем выравнивание текста */
+    line-height: 1;
 }
 
 .pagination {
