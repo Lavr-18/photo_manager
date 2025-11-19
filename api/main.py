@@ -87,13 +87,13 @@ def rotate_by_exif(img: Image) -> Image:
     return img
 
 
-# --- НОВАЯ ВСПОМОГАТЕЛЬНАЯ ФУНКЦИЯ ---
+# --- ВСПОМОГАТЕЛЬНАЯ ФУНКЦИЯ НОРМАЛИЗАЦИИ ---
 
 def normalize_name(name: str) -> str:
     """
     Нормализует название товара:
     1. Заменяет все '_' на '/'.
-    2. Заменяет множественные пробелы (или другие разделители) на одиночный пробел.
+    2. Заменяет множественные пробелы (включая неразрывные) на одиночный пробел.
     3. Удаляет пробелы в начале и конце.
     """
     if not name:
@@ -103,8 +103,7 @@ def normalize_name(name: str) -> str:
     name = name.replace('_', '/')
 
     # 2. Используем регулярное выражение для замены всех последовательностей
-    # пробелов (включая неразрывные) на одиночный пробел.
-    # \s+ ищет один или более символов-разделителей (пробелы, табы, переводы строки)
+    # пробелов (включая неразрывные \s+) на одиночный пробел.
     name = re.sub(r'\s+', ' ', name)
 
     # 3. Удаляем пробелы в начале и конце
@@ -116,14 +115,13 @@ def normalize_name(name: str) -> str:
 async def get_price_from_moysklad(product_name: str) -> str:
     """Получает цену товара из МойСклад по его названию (нормализованному)."""
     if not MOYSKLAD_API_TOKEN:
-        print("Warning: MOYSKLAD_API_TOKEN not set. Returning 'Нет данных'")
+        # print("Warning: MOYSKLAD_API_TOKEN not set. Returning 'Нет данных'")
         return "Нет данных"
 
     # Вручную URL-кодируем название товара
     encoded_product_name = quote(product_name)
     query_string = f"filter=name={encoded_product_name}"
 
-    # ИСПРАВЛЕНИЕ: Добавлены корректные заголовки
     headers = {
         "Authorization": f"Bearer {MOYSKLAD_API_TOKEN}",
         "Accept-Encoding": "gzip",
@@ -133,7 +131,6 @@ async def get_price_from_moysklad(product_name: str) -> str:
 
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
-            # Используем URL с закодированной строкой
             response = await client.get(
                 f"{MOYSKLAD_API_URL}?{query_string}",
                 headers=headers
@@ -154,33 +151,34 @@ async def get_price_from_moysklad(product_name: str) -> str:
         return "Нет цены"
 
     except httpx.HTTPStatusError as e:
-        print(f"Moysklad API Error ({e.response.status_code}): {e}")
+        # print(f"Moysklad API Error ({e.response.status_code}): {e}")
         return "Ошибка API"
     except Exception as e:
-        print(f"Error fetching Moysklad price for '{product_name}': {e}")
+        # print(f"Error fetching Moysklad price for '{product_name}': {e}")
         return "Ошибка"
 
 
 async def get_all_stock_data() -> dict[str, float]:
     """
     Получает полный отчет по остаткам с пагинацией и возвращает словарь
-    {нормализованное_название_товара: stock}.
+    {нормализованное_название_товара: quantity}.
     """
     if not MOYSKLAD_API_TOKEN:
-        print("Warning: MOYSKLAD_API_TOKEN not set for stock check.")
+        # print("Warning: MOYSKLAD_API_TOKEN not set for stock check.")
         return {}
 
     all_stock_rows = {}
     offset = 0
     total_size = float('inf')
 
-    # ИСПРАВЛЕНИЕ: Добавлены корректные заголовки
     headers = {
         "Authorization": f"Bearer {MOYSKLAD_API_TOKEN}",
         "Accept-Encoding": "gzip",
         "Accept": "application/json;charset=utf-8",
         "Lognex-Pretty-Print-JSON": "true"
     }
+
+    # print("Starting Moysklad stock data fetch...")
 
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
@@ -208,15 +206,18 @@ async def get_all_stock_data() -> dict[str, float]:
 
                 for row in rows:
                     name = row.get('name')
-                    # Используем 'stock' (текущий остаток)
-                    stock = row.get('stock', 0)
-                    if name:
-                        # ИСПРАВЛЕНИЕ: Используем нормализацию для создания ключа
+                    # ИСПРАВЛЕНИЕ: Используем 'quantity' (общий остаток)
+                    quantity = row.get('quantity', 0)
+
+                    if name and quantity > 0:
                         normalized_name = normalize_name(name)
-                        all_stock_rows[normalized_name] = stock
+                        all_stock_rows[normalized_name] = quantity
+                        # print(f"MS: '{normalized_name}' -> {quantity}") # Логирование для отладки
 
                 offset += STOCK_LIMIT
+                # print(f"Fetched {offset} of {total_size} items...")
 
+        print(f"Stock data fetched. Total unique items in stock: {len(all_stock_rows)}")
         return all_stock_rows
 
     except httpx.HTTPStatusError as e:
@@ -233,18 +234,18 @@ async def get_all_stock_data() -> dict[str, float]:
 async def list_files(
         page: int = Query(1, ge=1),
         query: str = Query(""),
-        in_stock: bool = Query(False)  # НОВЫЙ ПАРАМЕТР: фильтр по наличию
+        in_stock: bool = Query(False)
 ):
     client, sftp = None, None
     try:
         client, sftp = get_sftp_client()
 
-        # 1. Если включен фильтр "В наличии", получаем полный отчет по остаткам
+        # 1. Если включен фильтр "В наличии" или нужно показать остатки, получаем отчет
         stock_data = {}
-        if in_stock:
-            print("Fetching all stock data for filtering...")
+        # Загружаем данные, если фильтр включен ИЛИ если это не первая страница,
+        # чтобы показать остатки в списке
+        if in_stock or page == 1:
             stock_data = await get_all_stock_data()
-            print(f"Stock data fetched. Total items: {len(stock_data)}")
 
         # Получаем полный список файлов (игнорируем папки)
         file_list = [
@@ -257,11 +258,17 @@ async def list_files(
             filtered_list = []
             for filename in file_list:
                 # Извлекаем название товара и НОРМАЛИЗУЕМ его для поиска
-                product_name_raw = os.path.splitext(filename)[0]  # Убираем расширение
-                moysklad_name = normalize_name(product_name_raw)  # Полная нормализация
+                product_name_raw = os.path.splitext(filename)[0]
+                moysklad_name = normalize_name(product_name_raw)
 
                 # Проверяем наличие: stock > 0
                 stock_value = stock_data.get(moysklad_name, 0)
+
+                # if stock_value > 0:
+                #     print(f"FILE: '{filename}' -> MS: '{moysklad_name}' -> Stock: {stock_value} (IN STOCK)")
+                # else:
+                #     print(f"FILE: '{filename}' -> MS: '{moysklad_name}' -> Stock: {stock_value} (OUT OF STOCK)")
+
                 if stock_value > 0:
                     filtered_list.append(filename)
             file_list = filtered_list
@@ -300,7 +307,7 @@ async def list_files(
                 "https_url": f"{BASE_URL}{encoded_name}",
                 "preview_url": f"/api/preview/{encoded_name}",
                 "price": price,
-                "stock": stock_value  # Добавляем текущий остаток
+                "stock": stock_value
             })
 
         return {
