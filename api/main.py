@@ -142,7 +142,7 @@ async def list_files(page: int = Query(1, ge=1), query: str = Query("")):
             encoded_name = quote(filename, safe='')
 
             # 1. Извлекаем название товара: имя файла без расширения
-            product_name = os.path.splitext(filename)[0]
+            product_name = os.path.splitext(filename)[0].strip()
 
             # 2. ИСПРАВЛЕНИЕ: Заменяем символ '_' на '/' для точного поиска в МойСклад
             moysklad_name = product_name.replace('_', '/')
