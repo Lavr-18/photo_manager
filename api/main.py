@@ -1,27 +1,33 @@
 import os
-import re  # Новый импорт для работы с именем файла
-import httpx  # Новый импорт для HTTP-запросов
+import re
+import httpx
 from fastapi import FastAPI, Query
 from fastapi.responses import Response
 from paramiko import SSHClient, AutoAddPolicy
 from io import BytesIO
 from PIL import Image
 import mimetypes
-# import random # Удаляем random, так как он больше не нужен
 from urllib.parse import unquote, quote
 
 # --- КОНФИГУРАЦИЯ СЕРВЕРА ---
+# Директория с фотографиями на удаленном сервере
 REMOTE_PHOTO_DIR = "/var/www/html/extencion_photo/"
-BASE_URL = "https://tropicbridge.site/extencion_photo/"
+
+# Базовый URL для прямых ссылок (для копирования)
+# ИЗМЕНЕНО: Добавлен порт 8443
+BASE_URL = "https://tropicbridge.site:8443/extencion_photo/"
+
+# Размеры миниатюр
 PREVIEW_SIZE = (200, 200)
 
 # --- КОНФИГУРАЦИЯ MOYSKLAD ---
 MOYSKLAD_API_URL = "https://api.moysklad.ru/api/remap/1.2/entity/product"
+
 # --- ПЕРЕМЕННЫЕ ОКРУЖЕНИЯ ---
 SSH_HOST = os.environ.get("SSH_HOST")
 SSH_USER = os.environ.get("SSH_USER")
 SSH_PASSWORD = os.environ.get("SSH_PASSWORD")
-MOYSKLAD_API_TOKEN = os.environ.get("MOYSKLAD_API_TOKEN")  # Новый токен
+MOYSKLAD_API_TOKEN = os.environ.get("MOYSKLAD_API_TOKEN")  # Токен для МойСклад
 
 # Настройки пагинации
 PAGE_SIZE = 20
@@ -33,7 +39,7 @@ app = FastAPI(
 )
 
 
-# --- SSH/SFTP (Без изменений) ---
+# --- SSH/SFTP ---
 
 def get_sftp_client():
     """Подключается к удаленному серверу по SFTP."""
@@ -105,13 +111,13 @@ async def list_files(page: int = Query(1, ge=1), query: str = Query("")):
     try:
         client, sftp = get_sftp_client()
 
-        # ... (Код получения и фильтрации file_list без изменений)
-
+        # Получаем полный список файлов (игнорируем папки)
         file_list = [
             f.filename for f in sftp.listdir_attr(REMOTE_PHOTO_DIR)
             if f.st_mode is not None and not (f.st_mode & 0o40000)
         ]
 
+        # Фильтрация по запросу
         if query:
             query_lower = query.lower()
             file_list = [f for f in file_list if query_lower in f.lower()]
@@ -121,23 +127,24 @@ async def list_files(page: int = Query(1, ge=1), query: str = Query("")):
         total_files = len(file_list)
         total_pages = (total_files + PAGE_SIZE - 1) // PAGE_SIZE
 
+        # Пагинация
         start = (page - 1) * PAGE_SIZE
         end = start + PAGE_SIZE
         paged_list = file_list[start:end]
 
         files_data = []
         for filename in paged_list:
+            # Используем quote для URL-кодирования имени файла
             encoded_name = quote(filename, safe='')
 
-            # --- ЛОГИКА ИЗВЛЕЧЕНИЯ НАЗВАНИЯ И ПОЛУЧЕНИЯ ЦЕНЫ ---
-
-            # Извлекаем название товара: имя файла без расширения
-            # 'Фикус.png' -> 'Фикус'
-            # 'Название.товара.jpg' -> 'Название.товара'
+            # 1. Извлекаем название товара: имя файла без расширения
             product_name = os.path.splitext(filename)[0]
 
-            # Асинхронно получаем цену
-            price = await get_price_from_moysklad(product_name)
+            # 2. ИСПРАВЛЕНИЕ: Заменяем символ '_' на '/' для точного поиска в МойСклад
+            moysklad_name = product_name.replace('_', '/')
+
+            # 3. Асинхронно получаем цену
+            price = await get_price_from_moysklad(moysklad_name)
 
             files_data.append({
                 "name": filename,
@@ -164,12 +171,10 @@ async def list_files(page: int = Query(1, ge=1), query: str = Query("")):
 
 
 @app.get("/api/preview/{filename:path}")
-# ... (Код get_photo_preview остается без изменений)
 async def get_photo_preview(filename: str, download: bool = Query(False)):
     client, sftp = None, None
     try:
         # 1. Корректное декодирование имени файла
-        # Используем unquote для обратного URL-декодирования.
         decoded_filename = unquote(filename)
 
         # 2. Подключение и чтение
@@ -191,19 +196,16 @@ async def get_photo_preview(filename: str, download: bool = Query(False)):
                 img.thumbnail(PREVIEW_SIZE)
 
                 output = BytesIO()
-                # Сохраняем в том же формате, что и исходный файл (если возможно)
                 img.save(output, format=img.format if img.format else 'PNG')
                 content = output.getvalue()
             except Exception as thumbnail_error:
                 print(f"Error creating thumbnail for {decoded_filename}: {thumbnail_error}")
-                # Если миниатюра не создана, возвращаем полный файл
                 file_buffer.seek(0)
                 content = file_buffer.getvalue()
 
         # 4. Установка заголовков
         headers = None
         if download:
-            # ИСПРАВЛЕНИЕ 'latin-1' ОШИБКИ:
             encoded_header_filename = quote(decoded_filename)
             ascii_fallback_filename = decoded_filename.encode('ascii', 'ignore').decode('ascii')
             if not ascii_fallback_filename:
