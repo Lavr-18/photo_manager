@@ -87,10 +87,34 @@ def rotate_by_exif(img: Image) -> Image:
     return img
 
 
+# --- НОВАЯ ВСПОМОГАТЕЛЬНАЯ ФУНКЦИЯ ---
+
+def normalize_name(name: str) -> str:
+    """
+    Нормализует название товара:
+    1. Заменяет все '_' на '/'.
+    2. Заменяет множественные пробелы (или другие разделители) на одиночный пробел.
+    3. Удаляет пробелы в начале и конце.
+    """
+    if not name:
+        return ""
+
+    # 1. Заменяем разделитель из имени файла
+    name = name.replace('_', '/')
+
+    # 2. Используем регулярное выражение для замены всех последовательностей
+    # пробелов (включая неразрывные) на одиночный пробел.
+    # \s+ ищет один или более символов-разделителей (пробелы, табы, переводы строки)
+    name = re.sub(r'\s+', ' ', name)
+
+    # 3. Удаляем пробелы в начале и конце
+    return name.strip()
+
+
 # --- ФУНКЦИИ МОЙСКЛАД ---
 
 async def get_price_from_moysklad(product_name: str) -> str:
-    """Получает цену товара из МойСклад по его названию."""
+    """Получает цену товара из МойСклад по его названию (нормализованному)."""
     if not MOYSKLAD_API_TOKEN:
         print("Warning: MOYSKLAD_API_TOKEN not set. Returning 'Нет данных'")
         return "Нет данных"
@@ -99,11 +123,12 @@ async def get_price_from_moysklad(product_name: str) -> str:
     encoded_product_name = quote(product_name)
     query_string = f"filter=name={encoded_product_name}"
 
-    # ИСПРАВЛЕНИЕ: Добавлен корректный заголовок Accept
+    # ИСПРАВЛЕНИЕ: Добавлены корректные заголовки
     headers = {
         "Authorization": f"Bearer {MOYSKLAD_API_TOKEN}",
         "Accept-Encoding": "gzip",
-        "Accept": "application/json;charset=utf-8"
+        "Accept": "application/json;charset=utf-8",
+        "Lognex-Pretty-Print-JSON": "true"
     }
 
     try:
@@ -139,7 +164,7 @@ async def get_price_from_moysklad(product_name: str) -> str:
 async def get_all_stock_data() -> dict[str, float]:
     """
     Получает полный отчет по остаткам с пагинацией и возвращает словарь
-    {название_товара: stock}.
+    {нормализованное_название_товара: stock}.
     """
     if not MOYSKLAD_API_TOKEN:
         print("Warning: MOYSKLAD_API_TOKEN not set for stock check.")
@@ -149,11 +174,12 @@ async def get_all_stock_data() -> dict[str, float]:
     offset = 0
     total_size = float('inf')
 
-    # ИСПРАВЛЕНИЕ: Добавлен корректный заголовок Accept
+    # ИСПРАВЛЕНИЕ: Добавлены корректные заголовки
     headers = {
         "Authorization": f"Bearer {MOYSKLAD_API_TOKEN}",
         "Accept-Encoding": "gzip",
-        "Accept": "application/json;charset=utf-8"
+        "Accept": "application/json;charset=utf-8",
+        "Lognex-Pretty-Print-JSON": "true"
     }
 
     try:
@@ -185,9 +211,9 @@ async def get_all_stock_data() -> dict[str, float]:
                     # Используем 'stock' (текущий остаток)
                     stock = row.get('stock', 0)
                     if name:
-                        # Используем очищенное название как ключ
-                        # name.strip() соответствует имени из МойСклад (с пробелами и /)
-                        all_stock_rows[name.strip()] = stock
+                        # ИСПРАВЛЕНИЕ: Используем нормализацию для создания ключа
+                        normalized_name = normalize_name(name)
+                        all_stock_rows[normalized_name] = stock
 
                 offset += STOCK_LIMIT
 
@@ -230,10 +256,9 @@ async def list_files(
         if in_stock:
             filtered_list = []
             for filename in file_list:
-                # Извлекаем название товара и очищаем его, как для API
-                # Убираем расширение, чистим пробелы, меняем _ на /
-                product_name_raw = os.path.splitext(filename)[0].strip()
-                moysklad_name = product_name_raw.replace('_', '/')
+                # Извлекаем название товара и НОРМАЛИЗУЕМ его для поиска
+                product_name_raw = os.path.splitext(filename)[0]  # Убираем расширение
+                moysklad_name = normalize_name(product_name_raw)  # Полная нормализация
 
                 # Проверяем наличие: stock > 0
                 stock_value = stock_data.get(moysklad_name, 0)
@@ -260,15 +285,14 @@ async def list_files(
         for filename in paged_list:
             encoded_name = quote(filename, safe='')
 
-            # Извлекаем название товара и чистим пробелы
-            product_name = os.path.splitext(filename)[0].strip()
-            moysklad_name = product_name.replace('_', '/')
+            # Извлекаем название товара и НОРМАЛИЗУЕМ его для поиска цены и остатка
+            product_name = os.path.splitext(filename)[0]
+            moysklad_name = normalize_name(product_name)
 
             # Асинхронно получаем цену
             price = await get_price_from_moysklad(moysklad_name)
 
-            # Получаем остаток (или 0, если stock_data не загружался/товара нет)
-            # Этот же механизм используется для фильтрации, если in_stock=True
+            # Получаем остаток
             stock_value = stock_data.get(moysklad_name, 0)
 
             files_data.append({
@@ -315,7 +339,7 @@ async def get_photo_preview(filename: str, download: bool = Query(False)):
             try:
                 img = Image.open(file_buffer)
 
-                # ИСПРАВЛЕНИЕ: Коррекция ориентации на основе EXIF-данных
+                # Коррекция ориентации на основе EXIF-данных
                 img = rotate_by_exif(img)
 
                 img.thumbnail(PREVIEW_SIZE)
