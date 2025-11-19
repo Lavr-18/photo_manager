@@ -99,9 +99,11 @@ async def get_price_from_moysklad(product_name: str) -> str:
     encoded_product_name = quote(product_name)
     query_string = f"filter=name={encoded_product_name}"
 
+    # ИСПРАВЛЕНИЕ: Добавлен корректный заголовок Accept
     headers = {
         "Authorization": f"Bearer {MOYSKLAD_API_TOKEN}",
-        "Accept-Encoding": "gzip"
+        "Accept-Encoding": "gzip",
+        "Accept": "application/json;charset=utf-8"
     }
 
     try:
@@ -147,10 +149,11 @@ async def get_all_stock_data() -> dict[str, float]:
     offset = 0
     total_size = float('inf')
 
+    # ИСПРАВЛЕНИЕ: Добавлен корректный заголовок Accept
     headers = {
         "Authorization": f"Bearer {MOYSKLAD_API_TOKEN}",
         "Accept-Encoding": "gzip",
-        "Accept": "application/json"
+        "Accept": "application/json;charset=utf-8"
     }
 
     try:
@@ -183,6 +186,7 @@ async def get_all_stock_data() -> dict[str, float]:
                     stock = row.get('stock', 0)
                     if name:
                         # Используем очищенное название как ключ
+                        # name.strip() соответствует имени из МойСклад (с пробелами и /)
                         all_stock_rows[name.strip()] = stock
 
                 offset += STOCK_LIMIT
@@ -227,6 +231,7 @@ async def list_files(
             filtered_list = []
             for filename in file_list:
                 # Извлекаем название товара и очищаем его, как для API
+                # Убираем расширение, чистим пробелы, меняем _ на /
                 product_name_raw = os.path.splitext(filename)[0].strip()
                 moysklad_name = product_name_raw.replace('_', '/')
 
@@ -263,6 +268,7 @@ async def list_files(
             price = await get_price_from_moysklad(moysklad_name)
 
             # Получаем остаток (или 0, если stock_data не загружался/товара нет)
+            # Этот же механизм используется для фильтрации, если in_stock=True
             stock_value = stock_data.get(moysklad_name, 0)
 
             files_data.append({

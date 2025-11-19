@@ -116,3 +116,28 @@ h1 {
     font-size: 0.9em;
     margin-bottom: 10px;
 }
+
+/* НОВЫЙ СТИЛЬ: для выравнивания строки поиска и чекбокса */
+#filter-controls {
+    display: flex;
+    align-items: center; /* Выравнивает элементы по центру по вертикали */
+    gap: 10px; /* Добавляет небольшой промежуток между элементами */
+    margin-bottom: 10px; /* Переносим отступ вниз */
+}
+
+/* Изменяем ширину строки поиска, чтобы она делила место с чекбоксом */
+#search-input {
+    width: 100%; /* Занимает все доступное место в Flex-контейнере */
+    padding: 8px;
+    margin-bottom: 0; /* Убираем лишний отступ */
+    border: 1px solid #ccc;
+    border-radius: 4px;
+}
+
+/* Стили для лейбла чекбокса (чтобы он был компактным) */
+.stock-filter-label {
+    white-space: nowrap; /* Не дает тексту "В наличии" переноситься */
+    display: flex;
+    align-items: center;
+    font-size: 0.9em;
+}
