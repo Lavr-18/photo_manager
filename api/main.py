@@ -307,7 +307,8 @@ async def list_files(
                 "https_url": f"{BASE_URL}{encoded_name}",
                 "preview_url": f"/api/preview/{encoded_name}",
                 "price": price,
-                "stock": stock_value
+                "stock": stock_value,
+                "display_name": moysklad_name
             })
 
         return {

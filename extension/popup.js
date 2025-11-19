@@ -110,7 +110,7 @@ function createPhotoElement(file) {
     const copyNamePriceBtn = document.createElement('button');
     copyNamePriceBtn.textContent = '📝 Название + ₽';
     copyNamePriceBtn.className = 'small-btn';
-    const namePriceText = `${file.name} - ${file.price}`;
+    const namePriceText = `${file.display_name} - ${file.price}`;
     copyNamePriceBtn.onclick = () => copyTextToClipboard(namePriceText, 'Название и цена скопированы!');
     actions.appendChild(copyNamePriceBtn);
 
